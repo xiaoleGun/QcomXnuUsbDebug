@@ -37,11 +37,13 @@ python3 -B "$MODULE/scripts/xnu_patches.py" check --xnu "$XNU_SRC"
 python3 -B "$MODULE/scripts/xnu_patches.py" apply --xnu "$XNU_SRC"
 ```
 
-工具校验 Git revision、连续的补丁编号和文件路径，整组预检查通过后才使用一次 `git apply` 应用两份补丁。状态为 `ready`、`applied` 或 `conflict-or-mixed`。重复应用、错误版本和冲突均拒绝；不会执行 `reset/stash/clean`，也不使用 `--reject` 或三方合并。
+工具校验 Git revision、连续的补丁编号和文件路径，整组预检查通过后才使用一次 `git apply` 应用四份补丁。状态为 `ready`、`applied` 或 `conflict-or-mixed`。重复应用、错误版本和冲突均拒绝；不会执行 `reset/stash/clean`，也不使用 `--reject` 或三方合并。
 
 | 补丁 | 修改范围 |
 | --- | --- |
 | [0001 console](../patches/darwin22/0001-qcom-usb-debug-console.patch) | PE 初始化、kprintf、printf/debug、中央控制台、长消息及 panic |
+| [0003 msgbuf](../patches/darwin22/0003-qcom-usb-debug-msgbuf.patch) | TOLOG/TOLOGLOCKED、内核 os_log 的 CPU 入队 |
+| [0004 early](../patches/darwin22/0004-qcom-usb-debug-early-log.patch) | 冷入口计数器和早期初始化阶段 |
 | [0002 worker](../patches/darwin22/0002-qcom-usb-debug-worker.patch) | kminit 后启动 CPU 轮询线程、可选正常重启线程 |
 
 补丁仅引用 `QcomXnuUsbDebug.h`、`qcom_usb_debug_*` 和 `XNU_QCOM_USB_DEBUG`，不含板级地址、旧设备宏或显示驱动调用。截图 provider 由显示驱动注册，USB worker 无需修改。
@@ -55,26 +57,26 @@ python3 -B "$MODULE/scripts/build.py" \
   --output tmp/qud-module-build
 ```
 
-输出目录必须是新路径。输出包括 `libQcomXnuUsbDebug.a`、五个对象、日志和带源码 SHA256、外部导入及公共导出审计的 `build-report.json`。脚本不改 XNU 源码，不链接完整内核，不操作设备。
+输出目录必须是新路径。输出包括 `libQcomXnuUsbDebug.a`、五个基础对象（可选用户态入口增加第六个，见 [日志接入](logging.md)）、日志和带源码 SHA256、外部导入及公共导出审计的 `build-report.json`。脚本不改 XNU 源码，不链接完整内核，不操作设备。
 
-SoC 配置通过编译宏 `QUD_SOC_HEADER` 选取，供高通平台代码与 XNU 适配层使用。共享 DWC3 不引用该配置，由适配层传入 USB 标识和平台回调；XNU 的六个挂钩编译单元只需要公共接口头文件。
+SoC 配置通过编译宏 `QUD_SOC_HEADER` 选取，供高通平台代码与 XNU 适配层使用。共享 DWC3 不引用该配置，由适配层传入 USB 标识和平台回调；XNU 的九个挂钩编译单元只需要公共接口头文件。
 
 ## 5. 加入 XNU 编译与链接
 
-在目标内核构建配方给下列六个单元增加：
+在目标内核构建配方给下列九个单元增加：
 
 ```text
 -DXNU_QCOM_USB_DEBUG=1
 -I<absolute-module-path>/include
 ```
 
-单元为 `pexpert/arm/pe_kprintf.c`、`osfmk/kern/debug.c`、`osfmk/kern/printf.c`、`osfmk/console/serial_console.c`、`osfmk/console/serial_general.c`、`bsd/kern/bsd_init.c`。`XNU_SOCRATES_USB_LOG` 和 `XNU_SOCRATES_FB_CAPTURE` 不参与新补丁；不需要接显示截图私有头文件。
+单元为 `pexpert/arm/pe_kprintf.c`、`osfmk/kern/debug.c`、`osfmk/kern/printf.c`、`osfmk/console/serial_console.c`、`osfmk/console/serial_general.c`、`bsd/kern/bsd_init.c`、`bsd/kern/subr_prf.c`、`osfmk/arm/arm_init.c`、`osfmk/arm64/start.s`。最后一项将宏加入汇编预处理参数；其余为 C 单元。`XNU_SOCRATES_USB_LOG` 和 `XNU_SOCRATES_FB_CAPTURE` 不参与新补丁；不需要接显示截图私有头文件。
 
-把新归档加入目标内核的内建 archive/prelink 输入，保留所选构建器的依赖和顺序规则。不能同时链接旧设备 USB 归档。完整链接后检查：所有 `qcom_usb_debug_*` 调用均由新归档提供，没有未解析 hook、重复单例或 EFI imports。
+把新归档加入目标内核的内建 archive/prelink 输入，保留所选构建器的依赖和顺序规则。启用 sysctl 时用 `-force_load` 或等效逐对象规则保留注册对象；完整用户态日志另见 [logging.md](logging.md)。不能同时链接旧设备 USB 归档。完整链接后检查：所有 `qcom_usb_debug_*` 调用均由新归档提供，没有未解析 hook、重复单例或 EFI imports。
 
 在设备 catalog 中声明源码提交、SoC profile、构建命令、归档输出和 OS 依赖，再由设备的 kernel/payload/bootimg 配方消费。board.toml、构建器和归档路径由设备仓库维护。
 
-编译关闭时对六个单元设 `XNU_QCOM_USB_DEBUG=0`，它们不应导入任何 USB hook。不要编译开启但漏链归档。
+编译关闭时对九个单元设 `XNU_QCOM_USB_DEBUG=0`，它们不应导入任何 USB hook。不要编译开启但漏链归档。
 
 ## 6. 启动参数与能力选择
 
@@ -82,7 +84,7 @@ SoC 配置通过编译宏 `QUD_SOC_HEADER` 选取，供高通平台代码与 XNU
 | --- | --- |
 | `qcom-usb-debug=1` | 启动日志后端及正常 worker |
 | 另加 `qcom-usb-ctl=1` | 接收状态、重启、截图控制命令；默认关闭 |
-| `-enable_kprintf_spam` | 按 Darwin22 策略请求详细 kprintf，在 sink 就绪后才启用 |
+| `-enable_kprintf_spam` | 按 Darwin22 策略请求详细 kprintf，早期 CPU 缓存先补发，sink 就绪后恢复正常锁路径 |
 | `qcom-usb-diag=<mode>` | 显式诊断模式，可能按原诊断规则复位；日常采集不要添加 |
 
 没有 `qcom-usb-debug=1` 时不初始化硬件。缺少 `qcom-usb-ctl=1` 时正常 worker 不开启控制接口，也不安装重启回调。`serial=3`、`-v` 等由 OS 策略决定，不是硬件驱动的替代品。
@@ -114,6 +116,8 @@ python3 -B "$MODULE/scripts/xnu_usb_control.py" --socket tmp/qud-run/capture/usb
 
 ## 9. 模块与补丁自检
 
+完整日志配置优先使用 [logging.md 的统一检查入口](logging.md#一次运行完整软件检查)，一次构建并验证基础驱动、BSD 入口、用户态采集器与 XNU 补丁。以下保留各组件的独立检查方法。
+
 ```sh
 python3 -B "$MODULE/tests/check.py" --target-clang "$TARGET_CLANG" --output tmp/qud-model-check
 python3 -B "$MODULE/tests/check_xnu.py" \
@@ -122,7 +126,7 @@ python3 -B "$MODULE/tests/check_xnu.py" \
   --output tmp/qud-integration-check
 ```
 
-第一组共 28 项，运行实际 C 传输/私有域/缓冲/控制/截图模型及 SM8550 历史 qualifier，真实 C 应答到 Mac PNG CLI 的分片 socket 测试，以及 ELF/COFF 交叉编译。第二组共 20 项，从 `git show` 读取锁定源码，在独立 fixture 检验应用/撤销/冲突，编译六个输出与 worker 单元的开启/关闭版本，核对 hook 导入与归档导出。两者不修改传入的 XNU 树。
+第一组共 28 项，运行实际 C 传输/私有域/缓冲/控制/截图模型及 SM8550 历史 qualifier，真实 C 应答到 Mac PNG CLI 的分片 socket 测试，以及 ELF/COFF 交叉编译。第二组共 28 项，从 `git show` 读取锁定源码，在独立 fixture 检验应用/撤销/冲突，编译八个 C 输出/初始化/worker 单元及冷入口指令片段的开启/关闭版本，核对 hook 导入与归档导出。两者不修改传入的 XNU 树。
 
 完成这些检查后，还需链接完整内核，并在设备上验证 USB、重启和显示。保存镜像、源码 revision、配置、完整原始采集和恢复记录；容量及证据保留规则沿用 workspace 约束。
 
@@ -135,3 +139,5 @@ python3 -B "$MODULE/scripts/xnu_patches.py" reverse --xnu "$XNU_SRC"
 仅当整组补丁能完整反向应用时才撤销；有后续冲突时拒绝，不恢复整份源文件。同步撤下新归档、编译宏、参数及 provider，再按设备配方重建内核/payload/镜像。已运行的内建模块不能靠删参数在线卸载，应重启到验证过的回退镜像。
 
 旧设备接口迁移：`socrates-usb-log` → `qcom-usb-debug`，`sxnu-ctl` → `qcom-usb-ctl`，`socrates-usb-diag` → `qcom-usb-diag`，serial `SocratesXnuLog` → 默认 `QcomXnuUsbDebug`，结束标记 `SOCRATES PANIC END` → `QCOM PANIC END`。无旧宏/符号隐式兼容别名，主机命令和设备配方必须一同更新。来源设备的历史实现与证据保留原名。
+
+扩展检查使用实际 `start.o.json` 或唯一的 `start.*.json` 汇编记录，但只编译本模块的冷入口指令片段。公开 XNU 缺少部分 Apple tunables，完整 `start.s` 仍需消费者已有的平台前置补丁和最终构建；该片段检查不算完整汇编单元编译或内核链接。

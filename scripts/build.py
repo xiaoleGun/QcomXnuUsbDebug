@@ -57,6 +57,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--compile-record', type=Path, required=True,
                    help='pe_kprintf.o.json for selected ARM64 XNU')
+    p.add_argument('--userlog-compile-record', type=Path, help='optional BSD subr_prf.o.json; enables root-only userlog sysctl')
     p.add_argument('--soc', default='soc/Sm8550.h', help='module-relative profile')
     p.add_argument('--output', type=Path, required=True, help='new directory under tmp/ or .cache/')
     p.add_argument('--ar', help='llvm-ar executable')
@@ -77,22 +78,27 @@ def main():
     nm = a.nm or shutil.which('llvm-nm') or str(Path(ar).with_name('llvm-nm'))
     # Never overwrite an archive/evidence directory from a previous run.
     out.mkdir(parents=True, exist_ok=False)
-    defines = ['-I' + str(ROOT), '-I' + str(ROOT / 'kernel'), '-I' + str(ROOT / 'include'),
+    defines = ['-UXNU_SOCRATES_USB_LOG', '-UXNU_SOCRATES_FB_CAPTURE', '-I' + str(ROOT), '-I' + str(ROOT / 'kernel'), '-I' + str(ROOT / 'include'),
                '-DQUD_SOC_HEADER="' + profile.relative_to(ROOT).as_posix() + '"',
                '-Wno-reserved-identifier', '-Wno-pre-c11-compat']
     report = {'hardware_verified': False, 'kernel_linked': False,
               'compile_record_sha256': hashlib.sha256(record_bytes).hexdigest(),
-              'soc': a.soc, 'commands': [], 'source_sha256': {}}
+              'soc': a.soc, 'commands': [], 'source_sha256': {},
+              'userlog_enabled': bool(a.userlog_compile_record),
+              'userlog_compile_record_sha256': (hashlib.sha256(a.userlog_compile_record.read_bytes()).hexdigest()
+                                                 if a.userlog_compile_record else None)}
     inputs = [p for p in ROOT.rglob('*') if p.is_file() and p.suffix in ('.c', '.h')]
     before = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
     objects = []
     try:
-        for unit in UNITS:
+        for unit in UNITS + (('kernel/QcomUsbUserLog.c',) if a.userlog_compile_record else ()):
             obj = out / (Path(unit).stem + '.o')
-            command = flags + defines + ['-Wno-switch-default', '-c', str(ROOT / unit), '-o', str(obj)]
+            unit_flags, unit_cwd = (compile_flags(json.loads(a.userlog_compile_record.read_text().rstrip().rstrip(',')))
+                                    if unit.endswith('QcomUsbUserLog.c') else (flags, cwd))
+            command = unit_flags + defines + ['-Wno-switch-default', '-c', str(ROOT / unit), '-o', str(obj)]
             report['commands'].append(command)
             with (out / (obj.stem + '.log')).open('wb') as log:
-                subprocess.run(command, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, check=True)
+                subprocess.run(command, cwd=unit_cwd, stdout=log, stderr=subprocess.STDOUT, check=True)
             objects.append(str(obj))
         for name, digest in before.items():
             if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest:
@@ -108,13 +114,17 @@ def main():
         external = symbols('--undefined-only') - defined
         allowed = {'_PE_halt_restart', '_PE_parse_boot_argn', '_cpu_number', '_master_cpu',
                    '_ml_io_map', '_ml_static_vtop', '___stack_chk_guard', '___stack_chk_fail',
-                   '_bzero', '_memcpy', '_memset'}
+                   '_bzero', '_memcpy', '_memset', '_proc_suser', '_current_proc', '_snprintf',
+                   '_sysctl_register_oid_early', '_sysctl__debug_children'}
         if external - allowed:
             raise RuntimeError('unexpected XNU imports: ' + str(sorted(external - allowed)))
         required = {'_qcom_usb_debug_' + s for s in
                     ('init', 'write', 'putc', 'poll', 'panic_prepare', 'panic_drain', 'stop', 'get_status',
                      'control_start', 'control_take_reboot', 'control_arm_reboot',
-                     'control_reboot_failed', 'wait_drained', 'register_screenshot', 'register_framebuffer')}
+                     'control_reboot_failed', 'wait_drained', 'enqueue_putc', 'try_record',
+                     'worker_ready', 'worker_stopped', 'register_screenshot', 'register_framebuffer')}
+        if a.userlog_compile_record:
+            required |= {'_qcom_usb_userlog_submit', '_sysctl__debug_qcom_usb_userlog'}
         if not required <= defined:
             raise RuntimeError('missing public API exports')
         # The native adapter must never select the historical identity path.

@@ -1,22 +1,41 @@
 --- a/pexpert/arm/pe_kprintf.c
 +++ b/pexpert/arm/pe_kprintf.c
-@@ -13,6 +13,10 @@
+@@ -12,6 +12,11 @@
  #include <kern/simple_lock.h>
  #include <os/log_private.h>
  #include <libkern/section_keywords.h>
 +#if XNU_QCOM_USB_DEBUG
 +#include <QcomXnuUsbDebug.h>
++#include <QcomEarlyLog.h>
 +#endif
 +
  
  /* Globals */
  typedef void (*PE_kputc_t)(char);
-@@ -27,6 +31,24 @@
+@@ -26,6 +31,42 @@
  SECURITY_READ_ONLY_LATE(bool) disable_iolog_serial_output = false;
  SECURITY_READ_ONLY_LATE(bool) enable_dklog_serial_output = false;
  
 +#if XNU_QCOM_USB_DEBUG
 +static bool qcom_usb_debug_kprintf_requested;
++static bool qcom_early_kprintf = true;
++/* Must remain in initialized data: assembly writes before BSS clearing. */
++uint64_t qcom_early_entry_ticks = UINT64_MAX;
++void
++qcom_early_log_stage(const char *stage)
++{
++	static bool entry_reported;
++	uint64_t now, frequency;
++	__asm__ volatile("isb\nmrs %0, cntvct_el0" : "=r"(now) :: "memory");
++	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
++	if (!entry_reported) {
++		entry_reported = true;
++		qcom_early_emit("start_first_cpu", qcom_early_entry_ticks,
++		    qcom_early_entry_ticks, frequency, qcom_usb_debug_enqueue_putc);
++	}
++	qcom_early_emit(stage, now, qcom_early_entry_ticks, frequency,
++	    qcom_usb_debug_enqueue_putc);
++}
 +static void
 +qcom_usb_tee(char c)
 +{
@@ -36,7 +55,7 @@
  static SIMPLE_LOCK_DECLARE(kprintf_lock, 0);
  
  static void serial_putc_crlf(char c);
-@@ -50,6 +72,11 @@
+@@ -49,6 +90,11 @@
  	if (PE_parse_boot_argn("-enable_kprintf_spam", &enable_kprintf_spam, sizeof(enable_kprintf_spam))) {
  		disable_kprintf_output = false;
  	}
@@ -48,18 +67,21 @@
  #endif
  }
  // Do this early, so other code can depend on whether kprintf is enabled.
-@@ -70,6 +97,10 @@
+@@ -68,6 +114,13 @@
  		 */
  		PE_kputc = console_write_unbuffered;
  	}
 +#if XNU_QCOM_USB_DEBUG
++	qcom_early_log_stage("usb_init_begin");
 +	if (qcom_usb_debug_init()) PE_kputc = qcom_usb_debug_putc;
++	qcom_early_log_stage("usb_init_end");
++	qcom_early_kprintf = false;
 +	disable_kprintf_output = !qcom_usb_debug_kprintf_requested;
 +#endif
  }
  STARTUP(KPRINTF, STARTUP_RANK_FIRST, PE_init_kprintf);
  
-@@ -80,7 +111,7 @@
+@@ -78,7 +131,7 @@
  	va_list         listp;
  
  	va_start(listp, format);
@@ -68,7 +90,23 @@
  	va_end(listp);
  }
  #define MP_DEBUG_KPRINTF(x...)  _kprintf(x)
-@@ -123,7 +154,7 @@
+@@ -101,6 +154,15 @@
+ 	va_list         listp2;
+ 	boolean_t       state;
+ 	void           *caller = __builtin_return_address(0);
++#if XNU_QCOM_USB_DEBUG
++	if (qcom_early_kprintf) {
++		/* CPU-only before CPU data, locks and USB mappings are available. */
++		va_start(listp, fmt);
++		_doprnt_log(fmt, &listp, qcom_usb_debug_enqueue_putc, 16);
++		va_end(listp);
++	}
++#endif
++
+ 
+ 	if (!disable_serial_output && !disable_kprintf_output) {
+ 		va_start(listp, fmt);
+@@ -121,7 +183,7 @@
  			cpu_last_locked = cpu_number();
  		}
  

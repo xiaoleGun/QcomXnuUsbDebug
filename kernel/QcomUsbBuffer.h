@@ -20,10 +20,33 @@ struct soc_usb_buffer {
 };
 typedef size_t (*soc_usb_buffer_sink)(void *, const void *, size_t);
 
+/* Retryable framed producer: enqueue the whole record or leave the FIFO
+ * unchanged. The caller retains rejected data, so backpressure is not loss. */
+static inline size_t soc_usb_buffer_try_record(struct soc_usb_buffer *b,
+                                              const void *bytes, size_t count)
+{
+    const uint8_t *p = (const uint8_t *)bytes;
+    if (!bytes || !count || count > SOC_USB_LOG_WRITE_BUDGET || count > b->capacity) return 0;
+    if (__atomic_exchange_n(&b->busy, 1u, __ATOMIC_ACQUIRE)) return 0;
+    if (count > b->capacity - b->used) {
+        __atomic_store_n(&b->busy, 0u, __ATOMIC_RELEASE);
+        return 0;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        b->data[b->head] = p[i];
+        if (++b->head == b->capacity) b->head = 0;
+    }
+    __atomic_store_n(&b->used, b->used + count, __ATOMIC_RELAXED);
+    if (b->used > b->high_water) __atomic_store_n(&b->high_water, b->used, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&b->accepted, count, __ATOMIC_RELAXED);
+    __atomic_store_n(&b->busy, 0u, __ATOMIC_RELEASE);
+    return count;
+}
+
 static inline size_t soc_usb_buffer_write(struct soc_usb_buffer *b,
                                           const void *bytes, size_t count)
 {
-    const uint8_t *p = bytes;
+    const uint8_t *p = (const uint8_t *)bytes;
     size_t n, i;
     if (!bytes || !count) return 0;
     if (__atomic_exchange_n(&b->busy, 1u, __ATOMIC_ACQUIRE)) {

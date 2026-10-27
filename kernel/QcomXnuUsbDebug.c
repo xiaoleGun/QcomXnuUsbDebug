@@ -106,8 +106,10 @@ static int qcom_usb_control_halt_restart(unsigned int type)
 {
     if (type == CONTROL_PE_RESTART_CPU &&
         __atomic_load_n(&control_reboot_requested, __ATOMIC_ACQUIRE) &&
-        __atomic_load_n(&control_reboot_armed, __ATOMIC_ACQUIRE))
+        __atomic_load_n(&control_reboot_armed, __ATOMIC_ACQUIRE)) {
+        (void)qcom_usb_debug_wait_drained(2000);
         platform_smc_reset();
+    }
     return -1;
 }
 static void diag_checkpoint(unsigned int checkpoint)
@@ -1186,7 +1188,8 @@ void qcom_usb_debug_control_reboot_failed(int result)
 }
 int qcom_usb_debug_wait_drained(unsigned int timeout_ms)
 {
-    uint64_t start, ticks;
+    uint64_t start, ticks, quiet_start = 0;
+    int quiet = 0;
     if (timeout_ms > 10000u) timeout_ms = 10000u;
     if (!timeout_ms || !native.status.counter_frequency) return 0;
     start = counter();
@@ -1202,10 +1205,40 @@ int qcom_usb_debug_wait_drained(unsigned int timeout_ms)
         buffer_status_owned();
         pending = native.status.buffer_pending != 0 || native.status.transport_pending != 0;
         release(flags);
-        if (!pending) return 1;
+        /* A completed USB IN transfer only acknowledges the host controller.
+         * Keep polling through a bounded quiet window before reset, allowing
+         * the CDC tty consumer to read the final bytes. New bytes restart it. */
+        if (pending) quiet = 0;
+        else if (!quiet) { quiet = 1; quiet_start = counter(); }
+        else if (counter() - quiet_start >= native.status.counter_frequency / 4u) return 1;
         if (counter() - start >= ticks) return 0;
         delay_us(0, 1000);
     }
+}
+static unsigned int usb_worker_ready;
+void qcom_usb_debug_worker_ready(void)
+{
+    if (cpu_number() == master_cpu && native.status.phase == QCOM_USB_DEBUG_ACTIVE)
+        __atomic_store_n(&usb_worker_ready, 1u, __ATOMIC_RELEASE);
+}
+void qcom_usb_debug_worker_stopped(void)
+{
+    __atomic_store_n(&usb_worker_ready, 0u, __ATOMIC_RELEASE);
+}
+void qcom_usb_debug_enqueue_putc(char c)
+{
+    if (native.status.phase != QCOM_USB_DEBUG_DISABLED && native.status.phase != QCOM_USB_DEBUG_STOPPED)
+        (void)backlog_write(&c, 1);
+}
+size_t qcom_usb_debug_try_record(const void *bytes, size_t count)
+{
+    uint64_t flags;
+    size_t accepted;
+    if (native.status.phase != QCOM_USB_DEBUG_ACTIVE) return 0;
+    __asm__ volatile("mrs %0, daif\nmsr daifset, #3" : "=r"(flags) :: "memory");
+    accepted = soc_usb_buffer_try_record(&usb_log_buffer, bytes, count);
+    __asm__ volatile("msr daif, %0" :: "r"(flags) : "memory");
+    return accepted;
 }
 size_t qcom_usb_debug_write(const void *bytes, size_t count)
 {
@@ -1214,6 +1247,7 @@ size_t qcom_usb_debug_write(const void *bytes, size_t count)
     if (!bytes || !count || native.status.phase == QCOM_USB_DEBUG_DISABLED ||
         native.status.phase == QCOM_USB_DEBUG_STOPPED) return 0;
     accepted = backlog_write(bytes, count);
+    if (__atomic_load_n(&usb_worker_ready, __ATOMIC_ACQUIRE)) return accepted;
     if (native.status.phase != QCOM_USB_DEBUG_ACTIVE || !acquire(&flags)) return accepted;
     if (native.status.phase == QCOM_USB_DEBUG_ACTIVE) {
         (void)poll_owned();

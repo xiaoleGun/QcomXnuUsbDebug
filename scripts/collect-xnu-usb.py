@@ -215,9 +215,11 @@ def main():
  p.add_argument('--stage',choices=['xnu','uefi-usb-probe'],default='xnu')
  p.add_argument('--until-marker',default='QCOM PANIC END\n')
  p.add_argument('--no-marker',action='store_true',help='continue after panic markers until duration, disconnect or signal')
+ p.add_argument('--verify-logs',action='store_true',help='after closing capture, decode and require early/kernel/current user snapshot coverage')
  p.add_argument('--control-socket',action='store_true',help='create a private Unix socket for bounded hello/ping/status/reboot/screenshot frames')
  a=p.parse_args();a.output.mkdir(parents=True,exist_ok=True)
  reserved=('xnu-usb.log','capture.json','capture-progress.json')
+ if a.verify_logs:reserved+=('logs',)
  if a.control_socket:reserved+=('usb-control.sock','usb-control.jsonl')
  if any(os.path.lexists(a.output/name) for name in reserved):
   p.error('capture output already exists; choose a fresh output directory')
@@ -298,6 +300,15 @@ def main():
   if bridge is not None:bridge_summary=bridge.close()
   if fd is not None:os.close(fd)
  r=dict(status=status,started_utc=start,finished_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),port=path,usb_serial=a.serial,usb_observations=observations,bytes=size,synced_bytes=synced,sha256=sha.hexdigest(),max_bytes=a.max_bytes,duration_seconds=a.seconds,until_marker=marker.decode(),stage=a.stage,transport='USB CDC ACM; Android/ADB not used for capture',error=error,control_socket_requested=a.control_socket,control_socket_path=str(control_path) if control_path is not None else None,control=bridge_summary,partition_writes_issued=False)
- atomic_record(a.output/'capture.json',r);print(json.dumps(r,indent=2))
- return 0 if size and status!='capture-failed' else 1
+ r['logging_verification_requested']=a.verify_logs
+ atomic_record(a.output/'capture.json',r)
+ if a.verify_logs:
+  try:
+   from log_capture import verify_capture
+   r['logging']=verify_capture(a.output)
+  except (OSError,ValueError,RuntimeError) as exc:
+   r['logging']=dict(verified=False,error=str(exc))
+  atomic_record(a.output/'capture.json',r)
+ print(json.dumps(r,indent=2))
+ return 0 if size and status!='capture-failed' and (not a.verify_logs or r['logging']['verified']) else 1
 if __name__=='__main__':raise SystemExit(main())

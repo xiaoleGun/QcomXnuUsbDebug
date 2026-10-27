@@ -72,3 +72,29 @@ DWC3 控制序列和控制传输参考 AsahiLinux/m1n1 `v1.4.17`，提交 `6b83e
 | `soc/QcomUsbDmaDomain.h` | `UniXNU-socrates/usb-platform/QcomUsbDmaDomain.h` | `b8cfbdadd3144cef187cc4488596f5b878b358252d5fa38a4587caea35ede229` |
 | 历史记录原件 | `UniXNU-socrates/usb-platform/qualification-source.json` | `3307925ae0fedf31532a76ec81874f4011ae47e2ca9809dc9b2b019c7373b6ff` |
 | 历史记录原件 | `UniXNU-socrates/usb-platform/translated-domain-source.json` | `424eaa22c631595425c3f640aa13ba2776d7a547c880aa0d71741e7cf8a92f46` |
+
+## 最新日志实现的移入
+
+本次对照会话“按上游调整 UniXNU 结构”的 s77/s78/s79 日志批次。来源设备的早期日志检查点为 `92c556b5854b893edaaf3e3f3ca2315450b84da1`；上游采集器源为 AdrenoMetal `88849ec7942124c0454127ca80fc67de8407714c`。保留其 MIT 通知于 `userland/LICENSE.NativeMetal`。
+
+复用 CPU 队列、枚举分页、原生系统源与内存额度检查、解码和验收算法；将名称和帧前缀改为 Qcom/QCOM，并以独立 BSD sysctl 取代 GPU tunnel。来源 hash 是本次读取的原文件身份，不表示改名后的文件与之逐字相同。
+
+| 来源工作区路径（相对 UniXNU-socrates） | 移入时 SHA256 |
+| --- | --- |
+| `kernel/SocratesUsbLog.c` | `905cfbec86a3ad5e86abc5c20d7813a116fecd95160150f42faa55a54c082857` |
+| `kernel/SocratesUsbBuffer.h` | `4a55473f7b850e83e297e41ad5d2c47dca7d34f086c6c05477cadc12b9b752e7` |
+| `kernel/SocratesEarlyLog.h` | `e3a4ad7418d22f4d39578cb174d7cd0d2c18515a060a422061037340130191fb` |
+| `kernel/SocratesUserLogSink.cpp` | `fcaf43ce504637e228440ce8012188e214953c4e46749e438dcc5af5534a648c` |
+| `include/SocratesUserLogWire.h` | `fada2695d56ef31fa88b2e2265345fe03a477ac11f32fbdfe1708e51f4f88169` |
+| `userland/SocratesUserLogTransport.h` | `df9198ec8a551d69dce1f2e7ce001f0bb0cbc36e7510624bebb523fec1cc20a2` |
+| `userland/SocratesIos16LogStore.h` | `18cd84a6ba48abf80a5593c930ff420cd123f2ad0e45296cab1148daa0a4f6cd` |
+| `userland/SocratesLogMemory.h` | `8fd4061f564af46cfa70d718276043c0aac9054c4ae06cc088f3e3bc15925156` |
+| `userland/SocratesOsLogPages.inc` | `922c15b9b6c83f163f4fd69f8975081cf1b84cf6d23b79045f776b2eb2dcc6d7` |
+| `scripts/socrates_user_logs.py` | `ac9b3359c68904e3b4fa159a3a7176e89c5fddc75414d1a84d550f1f66fc16b0` |
+| `scripts/decode-ios16-user-logs.py` | `690933a97199890b7ed900c2660a60d47c5ec3a38b7b1839138f554181e4535b` |
+| `scripts/qualify-ios16-early-log.py` | `8ea995255932b9f17006fdf51d68b5b09ab02e993e89392802964a34e645f296` |
+| `patches/xnu-ios16-usb-msgbuf.patch` | `51e5ca00f454c36ba652f65d419609027598170a21c816a1e5dfbf691cc81451` |
+| `patches/xnu-ios16-early-log.patch` | `c2f2f70bae0eee1af63b00cdb33d239d922342e129710fa0664411dada9eb83b` |
+| `drivers/AdrenoMetal/NativeOsLogExport.mm` | `fcfb808fd7ddf742f626dcddbc2733b0335727b6c9b607f287fe2e46e7d659e4` |
+
+来源原始证据保留于 workspace `tmp/s77`、`tmp/s78`、`tmp/s79`，未复制进模块。s77 原始捕获 SHA256 `e75bf90efaf0bdc8a0accec6249ea43d8db711557a9f608f6736a1c093d0f811`，s78 为 `c165c028ff48338b99c287b19ced57d3c01bfeb6f5725f479d5084b09b68d042`，s79 为 `b24693f07d7b74a838bce1871518cadaa92576b57df7a79d979c4b5442b94863`。这些证据对应原设备代码；独立 sysctl 入口和模块最终内核另验。使用方法和边界见 [logging.md](logging.md)。

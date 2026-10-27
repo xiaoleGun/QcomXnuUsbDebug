@@ -84,28 +84,50 @@ def main():
     for name in config['translation_units']:
         stem = Path(name).stem
         candidates = list(a.records.resolve().glob('**/' + stem + '.o.json'))
+        if name.endswith('.s') and not candidates:
+            candidates = list(a.records.resolve().glob('**/start.*.json'))
         if len(candidates) != 1:
             raise ValueError('missing/ambiguous compile record for ' + name)
         record = json.loads(candidates[0].read_text().rstrip().rstrip(','))
         flags, cwd = build.compile_flags(record)
+        if name.endswith('.s'):
+            flags = [f for f in flags if f not in ('-xc', '-std=gnu11')] + ['-x', 'assembler-with-cpp']
+        compile_source = tree / name
+        if name.endswith('.s'):
+            # Public XNU omits Apple CPU tunables and requires consumer platform
+            # patches to assemble the whole entry. Compile only this module's
+            # exact checkpoint; do not silently alter unrelated platform code.
+            text = compile_source.read_text()
+            begin = text.index('#if XNU_QCOM_USB_DEBUG', text.index('LEXT(start_first_cpu)'))
+            end = text.index('#endif', begin) + len('#endif')
+            checkpoint = text[begin:end].replace('EXT(qcom_early_entry_ticks)', '_qcom_early_entry_ticks')
+            compile_source = out / 'cold-entry.s'
+            compile_source.write_text('.text\n.globl _qud_cold_entry_check\n_qud_cold_entry_check:\n' + checkpoint + '\nret\n')
         # Prove generic integration works without any legacy device macro.
         for enabled in (0, 1):
             obj = out / (stem + '-' + str(enabled) + '.o')
             args = flags + ['-UXNU_SOCRATES_USB_LOG', '-UXNU_SOCRATES_FB_CAPTURE',
                             '-UXNU_QCOM_USB_DEBUG', '-DXNU_QCOM_USB_DEBUG=' + str(enabled),
                             '-I' + str(ROOT / 'include'), '-Wno-reserved-identifier',
-                            '-Wno-pre-c11-compat', '-c', str(tree / name), '-o', str(obj)]
+                            '-Wno-pre-c11-compat', '-c', str(compile_source), '-o', str(obj)]
             with (out / (obj.stem + '.log')).open('wb') as log:
                 subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, check=True)
             imports = symbols(['--undefined-only', obj])
-            hooks = {s for s in imports if s.startswith('_qcom_usb_debug_')}
+            hooks = {s for s in imports if s.startswith(('_qcom_usb_debug_', '_qcom_early_'))}
             if enabled and name != 'osfmk/console/serial_general.c' and not hooks:
                 raise RuntimeError('enabled unit has no generic hooks: ' + name)
             if not enabled and hooks:
                 raise RuntimeError('disabled unit imports USB hooks: ' + name)
-            if not hooks <= exports or any('socrates' in s.lower() for s in imports):
+            if not hooks <= exports | {'_qcom_early_log_stage', '_qcom_early_entry_ticks'} or any('socrates' in s.lower() for s in imports):
                 raise RuntimeError('unresolved or device-specific imports: ' + name)
-            checks[name + ':enabled=' + str(enabled)] = sorted(hooks)
+            checks[name + (':entry-fragment' if name.endswith('.s') else '') + ':enabled=' + str(enabled)] = sorted(hooks)
+    pe_symbols = run([nm, '--format=posix', out/'pe_kprintf-1.o']).decode().splitlines()
+    if not any(line.split()[:2] == ['_qcom_early_entry_ticks', 'D'] for line in pe_symbols):
+        raise RuntimeError('cold entry timestamp must be initialized data, not BSS')
+    checks['cold-entry-initialized-data'] = 'D symbol, not zero-initialized BSS'
+    if not {'_qcom_early_log_stage', '_qcom_early_entry_ticks'} <= symbols(['--defined-only', out/'pe_kprintf-1.o']):
+        raise RuntimeError('missing early stage implementation or timestamp definition')
+    checks['cold-entry-stage-definitions'] = 'both internal early symbols resolve to PE object'
     patches.operate(tree, 'darwin22', 'reverse')
     for name, digest in before.items():
         if hashlib.sha256((tree / name).read_bytes()).hexdigest() != digest:
@@ -121,7 +143,8 @@ def main():
     # The shipped version pin must also refuse the fixture's unrelated commit.
     patches.patch_set = lambda profile: (config, series)
     expect_error('unsupported-revision', 'check')
-    report = {'xnu_revision': revision, 'hardware_verified': False, 'kernel_linked': False,
+    report = {'xnu_revision': revision, 'hardware_verified': False, 'kernel_linked': False, 'full_start_assembly_compiled': False,
+              'archive_sha256': hashlib.sha256(a.archive.read_bytes()).hexdigest(),
               'patch_sha256': {s.name: hashlib.sha256(s.read_bytes()).hexdigest() for s in series},
               'checks': checks}
     (out / 'xnu-check-report.json').write_text(json.dumps(report, indent=2) + '\n')

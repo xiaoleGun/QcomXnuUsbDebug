@@ -6,9 +6,11 @@
 
 | 检查 | 覆盖 | 不代表 |
 | --- | --- | --- |
+| `tests/check_all.py` | 按固定顺序运行基础/日志测试、完整归档、采集器和 XNU 检查，并绑定源码/归档身份 | 完整内核链接及设备部署 |
 | `tests/check.py` | 28 项：实际 C 传输/私有域/缓冲/控制/截图、ASan/UBSan、重定位资源、ELF/COFF、C 应答到分片 socket 和 PNG CLI | 真实硬件枚举/截图 |
-| `scripts/build.py` | 5 个 ARM64 XNU 对象、静态归档、来源 SHA、导入导出及禁止 identity fallback 审计 | 完整内核链接 |
-| `tests/check_xnu.py` | 20 项：补丁应用/撤销/重复/冲突/版本、六个真实单元开启与关闭编译、归档 hook 解析 | 设备启动或 reboot 成功 |
+| `scripts/build.py` | 5 个基础 ARM64 XNU 对象，可选第六个 BSD sysctl 对象、静态归档、来源 SHA、导入导出及禁止 identity fallback 审计 | 完整内核链接 |
+| `tests/check_logging.py` | 15 项：真实消息缓冲/早期 formatter、独立 sysctl、原子 ring、分页 exporter、系统源 ABI 和源覆盖门槛 | 设备部署及完整快照实测 |
+| `tests/check_xnu.py` | 28 项：补丁应用/撤销/重复/冲突/版本、八个真实 C 单元开启/关闭编译及冷入口指令片段、归档 hook 解析 | 设备启动或 reboot 成功 |
 
 宿主测试需允许创建本地 Unix socket。所有测试输出使用新 `tmp/` 目录；脚本拒绝覆盖既有报告。报告明确标记 `hardware_verified=false`。来源设备的历史结果按其当时的镜像和配置解释；本模块的硬件接入需另行验收。
 
@@ -38,7 +40,7 @@
 | `test_usb_screenshot_control.c` | 实际控制处理器的回压、重复序号、截图失败和重启回调要求 |
 | `test_screenshot.py` | C 应答经分片本地 socket 到 Mac CLI，验证 PNG 内容与 CRC |
 | `check.py` | 宿主模型、ASan/UBSan、SM8550/人工重定位矩阵、ELF/COFF 交叉编译 |
-| `check_xnu.py` | 版本锁定、补丁往返与冲突、六个 XNU 单元开关编译和归档 hook 解析 |
+| `check_xnu.py` | 版本锁定、补丁往返与冲突、八个 XNU C 单元和冷入口指令片段开关编译和归档 hook 解析 |
 
 ## 宿主测试运行方法
 
@@ -63,7 +65,7 @@ python3 -B "$MODULE/tests/check_xnu.py" \
   --output tmp/qud-integration-check
 ```
 
-这组共 20 项检查。脚本从传入内核读取锁定版本的源码，在独立 fixture 中应用和撤销补丁，不修改传入树。生成的对象、日志和报告保留在指定输出目录；整个过程不启动、刷写或重启设备。
+这组共 28 项检查。脚本从传入内核读取锁定版本的源码，在独立 fixture 中应用和撤销补丁，不修改传入树。生成的对象、日志和报告保留在指定输出目录；整个过程不启动、刷写或重启设备。
 
 历史平台记录见 [来源与证据](sources-and-evidence.md)，当前运行命令以本页为准。
 
@@ -72,3 +74,5 @@ python3 -B "$MODULE/tests/check_xnu.py" \
 C 模型通过模块根目录的 include 路径引用实际实现。需要寄存器模型时限制可访问地址，并断言失败时的写入及恢复行为；不要复制一份驱动算法来充当被测实现。测试只产生的夹具放在本目录，运行时生成的文件进入输出目录。
 
 新增 SoC 要扩展测试矩阵和对应夹具。仅传 `scripts/build.py --soc` 会选择构建 profile，不会自动运行该 SoC 的模型。查看 [适配经验](porting-other-socs.md) 中的具体要求。
+
+新增的完整日志接入、15 项专用主机测试、用户态构建及验收流程见 [logging.md](logging.md)。完整冷启动汇编仍需消费者平台前置补丁，指令片段编译不等于最终入口链接审计。

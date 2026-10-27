@@ -104,6 +104,14 @@ int qcom_usb_debug_init(void);
  * and producer contention are counted. Hardware service stays on the boot CPU.
  * A write accepts at most 16KiB; excess is counted and the prefix is returned.
  * No console, printf, allocation, scheduler or EFI functions are called. */
+/* CPU-only path for msgbuf locks and pre-VM bootstrap; never polls USB. */
+void qcom_usb_debug_enqueue_putc(char c);
+/* Atomic record queue: full/contended returns zero, without counting a drop.
+ * The caller retains the entire record and retries in normal thread context. */
+size_t qcom_usb_debug_try_record(const void *bytes, size_t count);
+/* Boot-CPU worker lifecycle; normal writes enqueue while the worker is ready. */
+void qcom_usb_debug_worker_ready(void);
+void qcom_usb_debug_worker_stopped(void);
 void qcom_usb_debug_putc(char c);
 size_t qcom_usb_debug_write(const void *bytes, size_t count);
 /* At most one USB event and a bounded pump; schedule externally if needed. */

@@ -121,3 +121,7 @@ VID/PID 必须非零，每个字符串为 1 至 31 个可打印 ASCII 字符。�
 [tests/test_dwc3.c](../tests/test_dwc3.c) 在没有 `QUD_SOC_HEADER` 的情况下运行，检查描述符、不同标识的实例、字符串复制、非法标识的 MMIO 前拒绝及控制传输。`tests/check.py` 还以相同条件编译 ARM64 ELF/COFF 对象，并核查无外部运行库导入。高通平台和 XNU 接口另有各自测试。
 
 代码派生自 Asahi Linux m1n1，许可证见 [LICENSE.m1n1](../usb/LICENSE.m1n1)；`Dwc3Regs.h` 保留原有 BSD 声明。
+
+## 扩展日志链路
+
+`include/QcomEarlyLog.h` 与 Darwin22 入口/初始化补丁记录十五个早期阶段，初始化前只写 CPU backlog。`kernel/QcomUsbUserLog.c` 是可选 BSD sysctl 入口，按 `include/QcomUserLogWire.h` 校验并原子入队；`userland/` 保存独立 root 采集器、分页与 OS 版本适配。主机的 decode/qualify 脚本校验传输和源覆盖。它们均不依赖 `soc/` 地址或显示/GPU 驱动，具体边界见 [logging.md](logging.md)。

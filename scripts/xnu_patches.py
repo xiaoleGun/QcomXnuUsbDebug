@@ -24,6 +24,9 @@ XNU_PROFILES = {
             'osfmk/console/serial_console.c',
             'osfmk/console/serial_general.c',
             'bsd/kern/bsd_init.c',
+            'bsd/kern/subr_prf.c',
+            'osfmk/arm/arm_init.c',
+            'osfmk/arm64/start.s',
         ),
     },
 }

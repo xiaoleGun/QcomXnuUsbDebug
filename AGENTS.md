@@ -15,9 +15,13 @@ Read `README.md`, `docs/boundaries.md`, `docs/porting-other-socs.md`, then `docs
 ## Tests and evidence
 
 - Put test sources, runners and checked-in fixtures in `tests/`. Keep build, patch-management and runtime tools in `scripts/`.
-- Run `tests/check.py`, `scripts/build.py` and `tests/check_xnu.py` as described in `docs/integration.md`. New SoC profiles need an explicit test-matrix entry and matching fixtures.
+- Use `tests/check_all.py` for complete logging builds; individual entry points are `tests/check.py`, `tests/check_logging.py`, `scripts/build.py` and `tests/check_xnu.py` as described in `docs/integration.md`. New SoC profiles need an explicit test-matrix entry and matching fixtures.
 - Generated objects, executables and reports belong in workspace `tmp/` or `.cache/`, outside this repository. Preserve original USB captures and their command/recovery metadata under the workspace rules.
 - Report model checks, kernel compilation/linking and hardware acceptance separately. Keep resource sources, revisions, hashes, reports and unverified capabilities with the consumer's adaptation record.
 - Retain file license notices and origin hashes when moving source. Keep original identities in `docs/sources-and-evidence.md`; Git tracks current revisions.
 
 This is an independent driver repository. Consumers reference it as `drivers/QcomXnuUsbDebug`; remote publication and device catalog/archive integration are separate changes.
+
+## Logging extensions
+
+Read `docs/logging.md` when adapting logging. Preserve the CPU-only msgbuf/early path and atomic framed records. Userland uses a root-only BSD sysctl, never a GPU endpoint. Keep Darwin22 memory and 20H392 system-store ABI checks explicit; other SoCs do not imply other userspace versions. Compile the final consumer start.s and inspect its resolved timestamp store before hardware acceptance.

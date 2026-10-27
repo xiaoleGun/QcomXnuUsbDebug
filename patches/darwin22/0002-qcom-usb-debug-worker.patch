@@ -1,6 +1,6 @@
 --- a/bsd/kern/bsd_init.c
 +++ b/bsd/kern/bsd_init.c
-@@ -109,6 +109,12 @@
+@@ -109,6 +109,13 @@
  #include <kern/zalloc.h>
  #include <kern/ux_handler.h>            /* for ux_handler_setup() */
  #include <kern/sched_hygiene.h>
@@ -9,11 +9,12 @@
 +#include <kern/cpu_number.h>
 +#include <kern/processor.h>
 +#include <kern/debug.h>
++#include <os/log.h>
 +#endif
  
  #if (DEVELOPMENT || DEBUG)
  #include <kern/debug.h>
-@@ -1268,11 +1274,220 @@
+@@ -1268,11 +1275,223 @@
  	lock_trace = 1;
  }
  
@@ -156,8 +157,10 @@
 +		kprintf("QCOM USB WORKER unavailable phase=%u error=%u\n", status.phase, status.error);
 +		goto stopped;
 +	}
++	qcom_usb_debug_worker_ready();
++	os_log_error(OS_LOG_DEFAULT, "QCOM MSGBUF CANARY v=1");
 +	__atomic_store_n(&qcom_usb_worker_state, 2u, __ATOMIC_RELEASE);
-+	kprintf("QCOM USB WORKER active cpu=%d period_ms=5 buffer=%llu\n",
++	kprintf("QCOM USB WORKER active cpu=%d period_ms=5 writer_mode=queued buffer=%llu\n",
 +	    cpu_number(), status.buffer_capacity);
 +	/* The short boot argument is evaluated only here, in the normal worker
 +	 * context. Default profiles install no callback and consume no action.
@@ -189,6 +192,7 @@
 +	}
 +
 +stopped:
++	qcom_usb_debug_worker_stopped();
 +	if (__atomic_load_n(&qcom_usb_worker_state, __ATOMIC_ACQUIRE) != 3u) {
 +		__atomic_store_n(&qcom_usb_worker_state, 4u, __ATOMIC_RELEASE);
 +	}

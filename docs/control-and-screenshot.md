@@ -2,7 +2,7 @@
 
 ## 运行方法
 
-按 [integration.md](integration.md) 链接模块和两份补丁，启动参数添加 `qcom-usb-debug=1 qcom-usb-ctl=1`。Mac 需要 Python 3 和 pyserial（在所用 Python 环境安装 `python3 -m pip install pyserial`）；PNG 工具本身只使用标准库。
+按 [integration.md](integration.md) 链接模块和四份补丁，启动参数添加 `qcom-usb-debug=1 qcom-usb-ctl=1`。Mac 需要 Python 3 和 pyserial（在所用 Python 环境安装 `python3 -m pip install pyserial`）；PNG 工具本身只使用标准库。
 
 从 workspace 根目录运行，`MODULE` 为模块绝对路径：
 

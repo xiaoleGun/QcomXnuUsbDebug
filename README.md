@@ -9,6 +9,7 @@ QcomXnuUsbDebug 为高通 ARM64 平台的 XNU 提供 USB 日志、Mac 双向控�
 | [源码目录与架构](docs/architecture.md) | 文件职责、控制器交接、DMA 和输出路径 |
 | [完整接入步骤](docs/integration.md) | 准备内核、检查/应用补丁、构建链接、启用、采集及回退 |
 | [职责和支持边界](docs/boundaries.md) | SoC / 设备 / XNU / 主机 / 显示驱动分工及限制 |
+| [内核与用户态日志](docs/logging.md) | 早期补发、消息缓冲、独立采集器、分页解码和完整性验收 |
 | [双向控制与截图](docs/control-and-screenshot.md) | 命令、协议、显示 provider、PNG 与错误处理 |
 | [使用和验收](docs/usage-and-validation.md) | 主机操作、检查命令、成功标准与排障 |
 | [平台配置](soc/Sm8550.h) | MMIO、时钟、SID、IOVA、USB 标识及复位能力 |
@@ -26,7 +27,7 @@ qcom_usb_debug_write("hello XNU\n", 10);
 qcom_usb_debug_poll(); /* 定期调用，或应用随附 worker 补丁。 */
 ```
 
-编译开关 `XNU_QCOM_USB_DEBUG=1`，运行启用参数 `qcom-usb-debug=1`；双向控制另加 `qcom-usb-ctl=1`。应用控制台补丁后自动捕获 `printf/IOLog/kprintf/panic`。默认 USB serial 为 `QcomXnuUsbDebug`，默认采集结束标记为 `QCOM PANIC END`。
+编译开关 `XNU_QCOM_USB_DEBUG=1`，运行启用参数 `qcom-usb-debug=1`；双向控制另加 `qcom-usb-ctl=1`。应用控制台补丁后自动捕获早期阶段和 `printf/IOLog/kprintf/panic`，消息缓冲补丁同时覆盖内核 `os_log`；用户态统一日志按 [日志指南](docs/logging.md) 额外构建并部署采集器。默认 USB serial 为 `QcomXnuUsbDebug`，默认采集结束标记为 `QCOM PANIC END`。
 
 主机在采集器已连接并启用 `--control-socket` 后使用：
 
@@ -41,3 +42,5 @@ python3 scripts/screenshot.py --socket <capture>/usb-control.sock --output <new-
 启用前，固件需要完成 USB 供电、时钟和 PHY 初始化。模块按单例轮询运行，使用有限的静态缓冲区；断连和深度休眠的支持范围见边界文档。控制协议限于文档列出的命令，不提供 GDB/KDP、远程 shell 或任意内存访问。
 
 驱动独立维护，设备通过 `drivers/QcomXnuUsbDebug` 子模块引用，远程仓库使用 `unixnu` topic。设备维护者负责 catalog、锁定提交和归档接入。当前代码尚未接入活动设备；原始采集证据保留在来源工作区。
+
+完整日志开发与验收使用 `tests/check_all.py`；采集时加 `--verify-logs` 可在结束后统一解码并核对原始捕获身份。参数、输出和源覆盖门槛见 [日志指南](docs/logging.md)。
